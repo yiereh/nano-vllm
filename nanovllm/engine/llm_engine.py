@@ -1,6 +1,7 @@
 import atexit
 from dataclasses import fields
 from time import perf_counter
+from typing import TypedDict, cast
 
 import torch.multiprocessing as mp
 from tqdm.auto import tqdm
@@ -11,6 +12,11 @@ from nanovllm.engine.model_runner import ModelRunner
 from nanovllm.engine.scheduler import Scheduler
 from nanovllm.engine.sequence import Sequence
 from nanovllm.sampling_params import SamplingParams
+
+
+class CompletionOutput(TypedDict):
+    text: str
+    token_ids: list[int]
 
 
 class LLMEngine:
@@ -43,7 +49,7 @@ class LLMEngine:
 
     def add_request(self, prompt: str | list[int], sampling_params: SamplingParams):
         if isinstance(prompt, str):
-            prompt = self.tokenizer.encode(prompt)
+            prompt = cast(list[int], self.tokenizer.encode(prompt))
         seq = Sequence(prompt, sampling_params)
         self.scheduler.add(seq)
 
@@ -63,7 +69,7 @@ class LLMEngine:
         prompts: list[str] | list[list[int]],
         sampling_params: SamplingParams | list[SamplingParams],
         use_tqdm: bool = True,
-    ) -> list[str]:
+    ) -> list[CompletionOutput]:
         pbar = tqdm(total=len(prompts), desc="Generating", dynamic_ncols=True, disable=not use_tqdm)
         if not isinstance(sampling_params, list):
             sampling_params = [sampling_params] * len(prompts)
@@ -87,5 +93,7 @@ class LLMEngine:
                 pbar.update(1)
         pbar.close()
         outputs = [outputs[seq_id] for seq_id in sorted(outputs.keys())]
-        outputs = [{"text": self.tokenizer.decode(token_ids), "token_ids": token_ids} for token_ids in outputs]
-        return outputs
+        return [
+            {"text": self.tokenizer.decode(token_ids), "token_ids": token_ids}
+            for token_ids in outputs
+        ]

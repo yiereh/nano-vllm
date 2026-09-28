@@ -18,6 +18,8 @@ class ModelRunner:
     def __init__(self, config: Config, rank: int, event: Event | list[Event]):
         self.config = config
         hf_config = config.hf_config
+        assert hf_config is not None
+        assert isinstance(hf_config.dtype, torch.dtype)
         self.block_size = config.kvcache_block_size
         self.enforce_eager = config.enforce_eager
         self.world_size = config.tensor_parallel_size
@@ -68,9 +70,12 @@ class ModelRunner:
 
     def read_shm(self):
         assert self.world_size > 1 and self.rank > 0
+        assert isinstance(self.event, Event)
         self.event.wait()
-        n = int.from_bytes(self.shm.buf[0:4], "little")
-        method_name, *args = pickle.loads(self.shm.buf[4:n+4])
+        buf = self.shm.buf
+        assert buf is not None
+        n = int.from_bytes(buf[0:4], "little")
+        method_name, *args = pickle.loads(buf[4:n+4])
         self.event.clear()
         return method_name, args
 
@@ -78,15 +83,18 @@ class ModelRunner:
         assert self.world_size > 1 and self.rank == 0
         data = pickle.dumps([method_name, *args])
         n = len(data)
-        self.shm.buf[0:4] = n.to_bytes(4, "little")
-        self.shm.buf[4:n+4] = data
+        buf = self.shm.buf
+        assert buf is not None
+        buf[0:4] = n.to_bytes(4, "little")
+        buf[4:n+4] = data
+        assert isinstance(self.event, list)
         for event in self.event:
             event.set()
 
     def call(self, method_name, *args):
         if self.world_size > 1 and self.rank == 0:
             self.write_shm(method_name, *args)
-        method = getattr(self, method_name, None)
+        method = getattr(self, method_name)
         return method(*args)
 
     def warmup_model(self):
@@ -104,11 +112,15 @@ class ModelRunner:
     def allocate_kv_cache(self):
         config = self.config
         hf_config = config.hf_config
+        assert hf_config is not None
+        assert isinstance(hf_config.dtype, torch.dtype)
+        num_kv_heads = hf_config.num_key_value_heads
+        assert num_kv_heads is not None
+        num_kv_heads //= self.world_size
         free, total = torch.cuda.mem_get_info()
         used = total - free
         peak = torch.cuda.memory_stats()["allocated_bytes.all.peak"]
         current = torch.cuda.memory_stats()["allocated_bytes.all.current"]
-        num_kv_heads = hf_config.num_key_value_heads // self.world_size
         head_dim = getattr(hf_config, "head_dim", hf_config.hidden_size // hf_config.num_attention_heads)
         block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * num_kv_heads * head_dim * hf_config.dtype.itemsize
         config.num_kvcache_blocks = int(total * config.gpu_memory_utilization - used - peak + current) // block_bytes
@@ -200,6 +212,9 @@ class ModelRunner:
         else:
             bs = input_ids.size(0)
             context = get_context()
+            assert context.slot_mapping is not None
+            assert context.context_lens is not None
+            assert context.block_tables is not None
             graph = self.graphs[next(x for x in self.graph_bs if x >= bs)]
             graph_vars = self.graph_vars
             graph_vars["input_ids"][:bs] = input_ids
@@ -212,7 +227,7 @@ class ModelRunner:
             graph.replay()
             return self.model.compute_logits(graph_vars["outputs"][:bs])
 
-    def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
+    def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int] | None:
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
         logits = self.run_model(input_ids, positions, is_prefill)
@@ -224,6 +239,7 @@ class ModelRunner:
     def capture_cudagraph(self):
         config = self.config
         hf_config = config.hf_config
+        assert hf_config is not None
         max_bs = min(self.config.max_num_seqs, 512)
         max_num_blocks = (config.max_model_len + self.block_size - 1) // self.block_size
         input_ids = torch.zeros(max_bs, dtype=torch.int64)
