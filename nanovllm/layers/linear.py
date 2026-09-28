@@ -23,10 +23,10 @@ class LinearBase(nn.Module):
         self.tp_rank = dist.get_rank()
         self.tp_size = dist.get_world_size()
         self.weight = nn.Parameter(torch.empty(output_size, input_size))
-        self.weight.weight_loader = self.weight_loader
+        setattr(self.weight, "weight_loader", self.weight_loader)
         if bias:
             self.bias = nn.Parameter(torch.empty(output_size))
-            self.bias.weight_loader = self.weight_loader
+            setattr(self.bias, "weight_loader", self.weight_loader)
         else:
             self.register_parameter("bias", None)
 
@@ -63,6 +63,7 @@ class ColumnParallelLinear(LinearBase):
         super().__init__(input_size, divide(output_size, tp_size), bias, 0)
 
     def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor):
+        assert self.tp_dim is not None
         param_data = param.data
         shard_size = param_data.size(self.tp_dim)
         start_idx = self.tp_rank * shard_size
@@ -84,7 +85,9 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
         self.output_sizes = output_sizes
         super().__init__(input_size, sum(output_sizes), bias)
 
-    def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor, loaded_shard_id: int):
+    def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor, loaded_shard_id: int | None = None):
+        assert loaded_shard_id is not None
+        assert self.tp_dim is not None
         param_data = param.data
         shard_offset = sum(self.output_sizes[:loaded_shard_id]) // self.tp_size
         shard_size = self.output_sizes[loaded_shard_id] // self.tp_size
@@ -111,7 +114,9 @@ class QKVParallelLinear(ColumnParallelLinear):
         output_size = (total_num_heads + 2 * total_num_kv_heads) * self.head_size
         super().__init__(hidden_size, output_size, bias)
 
-    def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor, loaded_shard_id: str):
+    def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor, loaded_shard_id: str | None = None):
+        assert loaded_shard_id is not None
+        assert self.tp_dim is not None
         param_data = param.data
         assert loaded_shard_id in ["q", "k", "v"]
         if loaded_shard_id == "q":
@@ -140,6 +145,7 @@ class RowParallelLinear(LinearBase):
         super().__init__(divide(input_size, tp_size), output_size, bias, 1)
 
     def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor):
+        assert self.tp_dim is not None
         param_data = param.data
         if param_data.ndim == 1:
             param_data.copy_(loaded_weight)
