@@ -1,3 +1,5 @@
+from typing import cast
+
 import torch
 import torch.distributed as dist
 from torch import nn
@@ -131,7 +133,7 @@ class Qwen3DecoderLayer(nn.Module):
         self.self_attn = Qwen3Attention(
             hidden_size=config.hidden_size,
             num_heads=config.num_attention_heads,
-            num_kv_heads=config.num_key_value_heads,
+            num_kv_heads=config.num_key_value_heads or config.num_attention_heads,
             max_position=config.max_position_embeddings,
             rms_norm_eps=config.rms_norm_eps,
             qkv_bias=getattr(config, 'attention_bias', True),
@@ -158,7 +160,10 @@ class Qwen3DecoderLayer(nn.Module):
         else:
             hidden_states, residual = self.input_layernorm(hidden_states, residual)
         hidden_states = self.self_attn(positions, hidden_states)
-        hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
+        hidden_states, residual = cast(
+            tuple[torch.Tensor, torch.Tensor],
+            self.post_attention_layernorm(hidden_states, residual),
+        )
         hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
 
