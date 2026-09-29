@@ -12,7 +12,7 @@ readme = "README.md"
 description = "a lightweight vLLM implementation built from scratch"
 requires-python = ">=3.10,<3.13"
 dependencies = [
-    "torch>=2.4.0",
+    "torch>=2.12,<2.13",
     "triton>=3.0.0",
     "transformers>=4.51.0",
     "flash-attn",
@@ -21,6 +21,18 @@ dependencies = [
 
 [project.urls]
 Homepage="https://github.com/GeeeekExplorer/nano-vllm"
+
+# flash-attn publishes no wheels on PyPI, and its source build forces -std=c++17
+# while torch >= 2.13 headers require C++20. Restrict torch to the version the
+# prebuilt wheels on Astral's CUDA 13 GPU index are built against and install
+# flash-attn from there.
+[tool.uv.sources]
+flash-attn = { index = "astral-cu130" }
+
+[[tool.uv.index]]
+name = "astral-cu130"
+url = "https://wheels.astral.sh/simple/cu130/"
+explicit = true
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -18,9 +18,18 @@ A lightweight vLLM implementation built from scratch.
 
 ## Installation
 
+This fork is set up for [uv](https://docs.astral.sh/uv/) with a committed lockfile, so a
+fresh checkout only needs:
+
 ```bash
-pip install git+https://github.com/GeeeekExplorer/nano-vllm.git
+uv sync
 ```
+
+Everything, including `flash-attn`, installs from prebuilt wheels: `flash-attn` has no
+PyPI wheels and its source build is incompatible with recent PyTorch, so the project
+pulls it from [Astral's CUDA 13 GPU index](https://wheels.astral.sh/), which pairs it
+with `torch` 2.12 (see `pyproject.toml`). No CUDA toolkit or compilation is required.
+Once a model is available (see below), run `uv run example.py`.
 
 ## Model Download
 
